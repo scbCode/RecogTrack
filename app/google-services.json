@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1044272755466",
+    "project_id": "recog-track",
+    "storage_bucket": "recog-track.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1044272755466:android:e7e357396c2cc0b934c0f3",
+        "android_client_info": {
+          "package_name": "com.ia.recog_track"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBIAeB6yGYWYmeLixnP9SQSwsQcDjSoNzA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
