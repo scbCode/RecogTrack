@@ -8,7 +8,7 @@ A solução elimina a necessidade de instalação de hardware GPS proprietário 
 Rastrear frotas urbanas de forma não invasiva, lidando com variáveis externas como trepidação, diferentes condições de iluminação e alta velocidade de movimentação dos veículos.
 
 ### 🛠️ Stack Tecnológica & Arquitetura
-Engine: Flutter (Android Native Integration).
+Engine: Android Native Integration.
 
 Intelligence: Google ML Kit (Text Recognition & Object Detection).
 
