@@ -365,8 +365,6 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         imageAnalysis = new ImageAnalysis.Builder().build();
 
         LifecycleCameraController lifecycleCameraController = new LifecycleCameraController(getApplicationContext());
-//        Range<Integer> fpsRange = Range.create(240, 240);
-//        lifecycleCameraController.setVideoCaptureTargetFrameRate(fpsRange);
         List<Detector<?>> detectors = new ArrayList<>();
         detectors.add(objectDetector);
 
