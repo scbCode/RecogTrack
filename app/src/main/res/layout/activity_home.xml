@@ -27,8 +27,15 @@
      android:id="@+id/textView"
      android:layout_width="match_parent"
      android:layout_height="wrap_content"
-     android:text="N"
+     android:layout_gravity="bottom"
+     android:background="#AA000000"
+     android:fontFamily="sans-serif-medium"
+     android:gravity="center"
+     android:padding="12dp"
+     android:text=""
      android:textColor="@color/white"
-     android:textSize="42dp" />
+     android:textSize="22sp"
+     android:textStyle="bold"
+     android:letterSpacing="0.05" />
 
 </FrameLayout>

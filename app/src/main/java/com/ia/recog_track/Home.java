@@ -109,6 +109,9 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
  * status bar and navigation/system bar) with user interaction.
  */
 @ExperimentalGetImage public class Home extends AppCompatActivity {
+    private static final String TAG = "Home";
+    private static final float OVERLAY_STROKE_WIDTH = 5f;
+    private static final int LINE_TEXT_VISIBLE_MILLIS = 3000;
     /**
      * Whether or not the system UI should be auto-hidden after
      * {@link #AUTO_HIDE_DELAY_MILLIS} milliseconds.
@@ -197,6 +200,9 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         }
     };
     private ActivityHomeBinding binding;
+    private ImageView detectionOverlayView;
+    private ImageView labelOverlayView;
+    private TextView linhaTextView;
 
     ObjectDetectorOptions options;
     ObjectDetector objectDetector;
@@ -210,35 +216,9 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         binding = ActivityHomeBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        mPreviewView = findViewById(R.id.previewView);
-        LocalModel localModel =
-                new LocalModel.Builder()
-                        .setAssetFilePath("8.tflite")//8 bus
-                        .build();
-
-        getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
-        height = displayMetrics.heightPixels;
-
-        width = displayMetrics.widthPixels;
-
-        CustomObjectDetectorOptions customObjectDetectorOptions =
-                new CustomObjectDetectorOptions.Builder(localModel)
-                        .setDetectorMode(CustomObjectDetectorOptions.STREAM_MODE)
-//                        .enableClassification()
-//                        .enableMultipleObjects()
-                        .build();
-
-        recognizer =
-                TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
-
-        CustomImageLabelerOptions customImageLabelerOptions =
-                new CustomImageLabelerOptions.Builder(localModel)
-//                        .setConfidenceThreshold(0.135f)
-                        .setConfidenceThreshold(0.135f)
-                        .build();
-        imageLabeler = ImageLabeling.getClient(customImageLabelerOptions);
-
-        objectDetector = ObjectDetection.getClient(customObjectDetectorOptions);
+        initViews();
+        updateDisplaySize();
+        initMlKit();
         if(allPermissionsGranted()){
             startCamera(); //start camera if permission has been granted by user
         } else{
@@ -326,6 +306,63 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
     private Executor executor;
+
+    private void initViews() {
+        mPreviewView = findViewById(R.id.previewView);
+        detectionOverlayView = findViewById(R.id.imageView);
+        labelOverlayView = findViewById(R.id.imageViewLabel);
+        linhaTextView = findViewById(R.id.textView);
+    }
+
+    private void initMlKit() {
+        LocalModel localModel = new LocalModel.Builder()
+                .setAssetFilePath("8.tflite")
+                .build();
+
+        CustomObjectDetectorOptions customObjectDetectorOptions =
+                new CustomObjectDetectorOptions.Builder(localModel)
+                        .setDetectorMode(CustomObjectDetectorOptions.STREAM_MODE)
+                        .build();
+
+        CustomImageLabelerOptions customImageLabelerOptions =
+                new CustomImageLabelerOptions.Builder(localModel)
+                        .setConfidenceThreshold(0.135f)
+                        .build();
+
+        recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+        imageLabeler = ImageLabeling.getClient(customImageLabelerOptions);
+        objectDetector = ObjectDetection.getClient(customObjectDetectorOptions);
+    }
+
+    private void updateDisplaySize() {
+        getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
+        height = displayMetrics.heightPixels;
+        width = displayMetrics.widthPixels;
+    }
+
+    private Bitmap createOverlayBitmap() {
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+    }
+
+    private Paint createStrokePaint(int color) {
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setColor(color);
+        paint.setStrokeWidth(OVERLAY_STROKE_WIDTH);
+        return paint;
+    }
+
+    private void drawBoundingBox(Canvas canvas, Rect rect, Paint paint) {
+        canvas.drawRect(rect.left, rect.top, rect.right, rect.bottom, paint);
+    }
+
+    private void showOverlay(ImageView view, Bitmap bitmap) {
+        runOnUiThread(() -> view.setImageBitmap(bitmap));
+    }
+
+    private void clearOverlay(ImageView view) {
+        runOnUiThread(() -> view.setImageBitmap(null));
+    }
     private void startCamera() {
 
         executor=ContextCompat.getMainExecutor(this);
@@ -362,163 +399,73 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
     @SuppressLint("RestrictedApi")
     void bindPreview(@NonNull ProcessCameraProvider cameraProvider) {
 
-        imageAnalysis = new ImageAnalysis.Builder().build();
+        ImageAnalysis.Builder imageAnalysisBuilder = new ImageAnalysis.Builder();
+        buildImageAnalysis(imageAnalysisBuilder);
+        imageAnalysis = imageAnalysisBuilder.build();
 
         LifecycleCameraController lifecycleCameraController = new LifecycleCameraController(getApplicationContext());
-        List<Detector<?>> detectors = new ArrayList<>();
-        detectors.add(objectDetector);
-
-        MlKitAnalyzer mlKitAnalyzer =  new MlKitAnalyzer(detectors, COORDINATE_SYSTEM_VIEW_REFERENCED,
-                executor, result -> {
-
-            for (DetectedObject detectedObject : result.getValue(objectDetector)) {
-
-                ImageView imgv = (ImageView) findViewById(R.id.imageView);
-
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        DisplayMetrics displayMetrics = new DisplayMetrics();
-                        getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
-                        int height = displayMetrics.heightPixels;
-                        int width = displayMetrics.widthPixels;
-                        Bitmap tempBitmap = Bitmap.createBitmap(width,
-                                height, Bitmap.Config.ARGB_8888);
-                        Canvas tempCanvas = new Canvas(tempBitmap);
-                        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                        paint.setStyle(Paint.Style.STROKE);
-                        paint.setColor(Color.GREEN);
-                        paint.setStrokeWidth(5);
-                        Rect rect = detectedObject.getBoundingBox();
-                        float leftx = rect.left;
-                        float topy = rect.top;
-                        float rightx = rect.right;
-                        float bottomy = rect.bottom;
-                        tempCanvas.drawRect(leftx, topy, rightx, bottomy, paint);
-
-                        Log.i("getlabel","getlabel "+ detectedObject.getLabels());
-                        paint.setTextSize(30);
-                        tempCanvas.drawText("x",  leftx, bottomy+50, paint);
-                        imgv.setImageBitmap(tempBitmap);
-
-
-                    }
-                });
-
-            }
-        });
 
         lifecycleCameraController.bindToLifecycle(this);
 
         lifecycleCameraController.setImageAnalysisAnalyzer(executor, yourAnalyzer);
         mPreviewView.setController(lifecycleCameraController);
-
-//        Calendar currentTime = Calendar.getInstance();
-//        if (currentTime.get(Calendar.HOUR) >18){
-//        Handler handler = new Handler();
-//        handler.postDelayed(new Runnable() {
-//            @Override
-//            public void run() {
-//                ExposureState exposureState = lifecycleCameraController.getCameraInfo().getExposureState();
-//                Range<Integer> range=   Range.create(mPreviewView.getController().getVideoCaptureTargetFrameRate().getUpper(),
-//                        mPreviewView.getController().getVideoCaptureTargetFrameRate().getUpper());
-//                mPreviewView.getController().setVideoCaptureTargetFrameRate( range);
-//                MediaStoreOutputOptions mediaStoreOutputOptions = new MediaStoreOutputOptions
-//                        .Builder(getContentResolver(), MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-//                        .setDurationLimitMillis(5000)
-//                        .build();
-//
-//                if (exposureState.isExposureCompensationSupported()) {
-////                    Log.i("getExposureCompensationRDange", "getExposureCompensationRange " + range);
-////                    lifecycleCameraController.getCameraControl().setExposureCompensationIndex(range.getUpper());
-////                    lifecycleCameraController.getCameraControl().cancelFocusAndMetering();\
-//
-//                }
-//            }
-//        },3000);}
     }
     DisplayMetrics displayMetrics = new DisplayMetrics();
     int height = 0;
     int width = 0;
     boolean check=false;
-    public void mlkitapi(InputImage inputImage,ImageProxy imageProxy){
+    public void mlkitapi(ImageProxy imageProxy){
 
 
         Log.i("analizer","analizer ");
 
-        analizer(inputImage,imageProxy);
+        analizer(imageProxy);
     }
 
-   public void analizer(InputImage inputImage,ImageProxy imageProxy){
+   public void analizer(ImageProxy imageProxy){
        int rotationDegrees = imageProxy.getImageInfo().getRotationDegrees();
        Image image = imageProxy.getImage();
-       Task<?> mlKitTask = null;
-       try {
-           if (mlKitTask == null) {
-               mlKitTask =
-                       objectDetector.process(image, rotationDegrees, analysisToTarget);
-
-               mlKitTask.addOnCompleteListener(
-                       executor,
-                       task -> {
-                           // Record the return value / exception.
-                           if (task.isCanceled()) {
-                           } else if (task.isSuccessful()) {
-
-                               if (task.getResult() != null) {
-                                   List<DetectedObject> l = ((List<DetectedObject>) task.getResult());
-
-                                   DisplayMetrics displayMetrics = new DisplayMetrics();
-                                   getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
-                                   int height = displayMetrics.heightPixels;
-                                   int width = displayMetrics.widthPixels;
-                                   Bitmap tempBitmap = Bitmap.createBitmap(width,
-                                           height, Bitmap.Config.ARGB_8888);
-                                   Canvas tempCanvas = new Canvas(tempBitmap);
-                                   Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                                   paint.setStyle(Paint.Style.STROKE);
-                                   paint.setColor(Color.GREEN);
-                                   paint.setStrokeWidth(5);
-
-                                   for (DetectedObject detectedObject : l) {
-                                       ImageView imgv = (ImageView) findViewById(R.id.imageView);
-
-//                                    ///CLASSIFICACAO IMAGEM
-                                       runOnUiThread(new Runnable() {
-                                           @Override
-                                           public void run() {
-                                               Rect rect = detectedObject.getBoundingBox();
-                                               float leftx = rect.left;
-                                               float topy = rect.top;
-                                               float rightx = rect.right;
-                                               float bottomy = rect.bottom;
-                                               tempCanvas.drawRect(leftx, topy, rightx, bottomy, paint);
-                                               imgv.setImageBitmap(tempBitmap);
-                                           }
-                                       });
-                                       InputImage inputImageClassification = InputImage.fromBitmap(changeBitmapContrastBrightness(imageProxy.toBitmap(),2,4),rotationDegrees);
-                                       label(detectedObject.getBoundingBox(), image.getCropRect(), inputImageClassification);
-                                   }
-                               } else {
-                                   ImageView imgv = (ImageView) findViewById(R.id.imageView);
-                                   DisplayMetrics displayMetrics = new DisplayMetrics();
-                                   getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
-                                   int height = displayMetrics.heightPixels;
-                                   int width = displayMetrics.widthPixels;
-                                   Bitmap tempBitmap = Bitmap.createBitmap(width,
-                                           height, Bitmap.Config.ARGB_8888);
-                                   imgv.setImageBitmap(tempBitmap);
-
-                               }
-                           } else {
-                               Log.i("onSuccess", "onSuccess x");
-                           }
-                           imageProxy.close();
-                       });
-           }
-       }catch (Exception e){
-
+       if (image == null) {
+           imageProxy.close();
+           return;
        }
+       try {
+           Task<?> mlKitTask = objectDetector.process(image, rotationDegrees, analysisToTarget);
+           mlKitTask.addOnCompleteListener(
+                   executor,
+                   task -> {
+                       if (task.isSuccessful() && task.getResult() != null) {
+                           List<DetectedObject> detections = (List<DetectedObject>) task.getResult();
+                           handleDetections(detections, imageProxy, rotationDegrees);
+                       } else if (task.getException() != null) {
+                           Log.e(TAG, "Falha na deteccao de objetos", task.getException());
+                       }
+                       imageProxy.close();
+                   });
+       }catch (Exception e){
+           Log.e(TAG, "Erro no pipeline de analise", e);
+           imageProxy.close();
+       }
+    }
+
+    private void handleDetections(List<DetectedObject> detections, ImageProxy imageProxy, int rotationDegrees) {
+        if (detections == null || detections.isEmpty()) {
+            clearOverlay(detectionOverlayView);
+            return;
+        }
+
+        Bitmap tempBitmap = createOverlayBitmap();
+        Canvas tempCanvas = new Canvas(tempBitmap);
+        Paint paint = createStrokePaint(Color.CYAN);
+        Bitmap enhancedFrame = changeBitmapContrastBrightness(imageProxy.toBitmap(), 2, 4);
+
+        for (DetectedObject detectedObject : detections) {
+            drawBoundingBox(tempCanvas, detectedObject.getBoundingBox(), paint);
+            InputImage inputImageClassification = InputImage.fromBitmap(enhancedFrame, rotationDegrees);
+            label(detectedObject.getBoundingBox(), inputImageClassification);
+        }
+
+        showOverlay(detectionOverlayView, tempBitmap);
     }
 
     FirebaseFirestore db = FirebaseFirestore.getInstance();
@@ -569,15 +516,12 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
     Task<?> taskTextRec = null;
 
    public void textRecognizerByImage(Bitmap inputImage, int rd){
-       Executor executorText = ContextCompat.getMainExecutor(this);
-       TextView imgv = (TextView) findViewById(R.id.textView);
-
        try {
 
        taskTextRec = recognizer.process(InputImage.fromBitmap(inputImage,rd));
 
        taskTextRec.addOnCompleteListener(
-               executorText, task -> {
+               executor, task -> {
                    if (task.isSuccessful()){
                        if (task.getResult() != null) {
                            Text text = (Text) task.getResult();
@@ -585,13 +529,8 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
                            if (!text.getText().isEmpty()) {
                                String linha = getLinha(text.getText());
                                if (!linha.isEmpty()) {
-                                   saveText(linha);
-                                   runOnUiThread(new Runnable() {
-                                       @Override
-                                       public void run() {
-                                           imgv.setText(linha);
-                                       }
-                                   });
+                                   //saveText(linha);
+                                   showLinhaTemporarily(linha);
                                      saveImageNoClassification(processImg(inputImage));
                                }
                            }
@@ -604,6 +543,16 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
 
        }
 
+    }
+
+    private void showLinhaTemporarily(String linha) {
+        runOnUiThread(() -> {
+            linhaTextView.setText(linha);
+            new Handler(Looper.getMainLooper()).postDelayed(
+                    () -> linhaTextView.setText(""),
+                    LINE_TEXT_VISIBLE_MILLIS
+            );
+        });
     }
 
     public void saveImageNoClassification(Bitmap croppedImage){
@@ -631,52 +580,29 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         }
     }
 
-    public void label(Rect rect,Rect crop, InputImage inputImage){
-        Executor executorLabel = ContextCompat.getMainExecutor(this);
+    public void label(Rect rect, InputImage inputImage){
         int rotationDegrees = inputImage.getRotationDegrees();
         try {
 
             Task<List<ImageLabel>> task = imageLabeler.process(inputImage);
-            ImageView imgv = (ImageView) findViewById(R.id.imageViewLabel);
-            imgv.setDrawingCacheEnabled(true);
+            labelOverlayView.setDrawingCacheEnabled(true);
             task.addOnSuccessListener(new OnSuccessListener<List<ImageLabel>>() {
                 @Override
                 public void onSuccess(List<ImageLabel> imageLabels) {
                     if (imageLabels!=null){
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                DisplayMetrics displayMetrics = new DisplayMetrics();
-                                getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
-                                int height = displayMetrics.heightPixels;
-                                int width = displayMetrics.widthPixels;
-                                Bitmap tempBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                                Canvas tempCanvas = new Canvas(tempBitmap);
-                                Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                                paint.setStyle(Paint.Style.STROKE);
-                                paint.setColor(Color.GREEN);
-                                paint.setStrokeWidth(5);
-                                float leftx = rect.left;
-                                float topy = rect.top;
-                                float rightx = rect.right;
-                                float bottomy = rect.bottom;
-//                                tempCanvas.drawRect(leftx, topy, rightx, bottomy, paint);
-                                paint.setTextSize(70);
-                                if (imageLabels.size()>0) {
-                                    for (int i = 0; i < imageLabels.size(); i++) {
-                                    tempCanvas.drawText(imageLabels.get(0).getText() + " "
-                                            + imageLabels.get(0).getConfidence(), leftx, bottomy + 50, paint);
-                                    String label = imageLabels.get(0).getText();
-                                    imgv.setImageBitmap(tempBitmap);
-                                    if (label.toLowerCase().contains("bus") || label.toLowerCase().contains("streetcar")){
+                        runOnUiThread(() -> {
+                            Bitmap tempBitmap = createOverlayBitmap();
+                            Canvas tempCanvas = new Canvas(tempBitmap);
 
-                                        textRecognizerByImage(inputImage.getBitmapInternal(),rotationDegrees);
-
-                                    }
-                                    Log.i("getlabel", "getlabel " + label);
-                                    }
-
+                            if (!imageLabels.isEmpty()) {
+                                String label = imageLabels.get(0).getText();
+                                showOverlay(labelOverlayView, tempBitmap);
+                                if (isTransitLabel(label)) {
+                                    drawBoundingBox(tempCanvas, rect, createStrokePaint(Color.BLUE));
+                                    showOverlay(labelOverlayView, tempBitmap);
+                                    textRecognizerByImage(inputImage.getBitmapInternal(),rotationDegrees);
                                 }
+                                Log.i("getlabel", "getlabel " + label);
                             }
                         });
                     }
@@ -690,6 +616,11 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
 
         }
     }
+
+    private boolean isTransitLabel(String label) {
+        String normalizedLabel = label.toLowerCase();
+        return normalizedLabel.contains("bus") || normalizedLabel.contains("streetcar");
+    }
     Matrix analysisToTarget = new Matrix();
     ImageProxy imageP;
     private class YourAnalyzer implements ImageAnalysis.Analyzer {
@@ -698,35 +629,28 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         @Override
         public void analyze(@NonNull ImageProxy imageProxy) {
 
-                analysisToTarget =mPreviewView.getSensorToViewTransform();
-                Bitmap mediaImage = imageProxy.toBitmap();
+            analysisToTarget =mPreviewView.getSensorToViewTransform();
 
-                if (mediaImage != null) {
+            Matrix sensorToTarget = mPreviewView.getSensorToViewTransform();
+            Matrix sensorToAnalysis =
+                    new Matrix(imageProxy.getImageInfo().getSensorToBufferTransformMatrix());
+            // Calculate the rotation added by ML Kit.
+            RectF sourceRect = new RectF(0, 0, imageProxy.getWidth(),
+                    imageProxy.getHeight());
+            RectF bufferRect = rotateRect(sourceRect,
+                    imageProxy.getImageInfo().getRotationDegrees());
+            Matrix analysisToMlKitRotation = getRectToRect(sourceRect, bufferRect,
+                    imageProxy.getImageInfo().getRotationDegrees());
+            // Concat the MLKit transformation with sensor to Analysis.
+            sensorToAnalysis.postConcat(analysisToMlKitRotation);
+            // Invert to get analysis to sensor.
+            sensorToAnalysis.invert(analysisToTarget);
+            // Concat sensor to target to get analysisToTarget.
+            analysisToTarget.postConcat(sensorToTarget);
 
-                        Matrix sensorToTarget = mPreviewView.getSensorToViewTransform();
-                    Matrix sensorToAnalysis =
-                            new Matrix(imageProxy.getImageInfo().getSensorToBufferTransformMatrix());
-                    // Calculate the rotation added by ML Kit.
-                    RectF sourceRect = new RectF(0, 0, imageProxy.getWidth(),
-                            imageProxy.getHeight());
-                    RectF bufferRect = rotateRect(sourceRect,
-                            imageProxy.getImageInfo().getRotationDegrees());
-                    Matrix analysisToMlKitRotation = getRectToRect(sourceRect, bufferRect,
-                            imageProxy.getImageInfo().getRotationDegrees());
-                    // Concat the MLKit transformation with sensor to Analysis.
-                    sensorToAnalysis.postConcat(analysisToMlKitRotation);
-                    // Invert to get analysis to sensor.
-                    sensorToAnalysis.invert(analysisToTarget);
-                    // Concat sensor to target to get analysisToTarget.
-                    analysisToTarget.postConcat(sensorToTarget);
+            mlkitapi(imageProxy);
 
-                    InputImage image =
-                            InputImage.fromBitmap(mediaImage, imageProxy.getImageInfo().getRotationDegrees());
-
-                    mlkitapi(image,imageProxy);
-
-                    Log.i("onSuccess", "onSuccess sensorToTarget");
-                }
+            Log.i("onSuccess", "onSuccess sensorToTarget");
         }
     }
 
@@ -737,11 +661,8 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         for (int i = 0; i <  map.length; i++) {
             String numLinha = map[i].split(" : ")[0];
             String nomeLinha = map[i].split(" : ")[1];
-            String number = linha.replaceAll("[^0-9]","");
+            String number = linha.replaceAll("[^0-9]","").replaceAll("-","");
             String onlyletter = linha.replaceAll(("[a-zA-Z]+"),"");
-            Log.i("getLinha","getLinha ##############################################");
-            Log.i("getLinha","getLinha "+ linha);
-            Log.i("getLinha","getLinha number "+ number);
             Log.i("getLinha","getLinha onlyletter "+ onlyletter);
             Log.i("getLinha","getLinha ##############################################");
             if (onlyletter.length()>3) {
@@ -751,21 +672,21 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
                         return map[i];
                     }
                 }
-            }else
+            }
             if (onlyletter.length()==3) {
                 if (number.contains(numLinha)) {
                         count = 3;
                         return map[i];
                 }
-            }else
+            }
             if(number.equals(numLinha)){
                 return map[i];
-            }else
+            }
             if(number.length()>3){
                 String n = number.substring(0,3);
                 if (numLinha.contains(n))
                     return map[i];
-            }else
+            }
             if(linha.length()<=3)
                 if(number.equals(numLinha)){
                     count=1;
