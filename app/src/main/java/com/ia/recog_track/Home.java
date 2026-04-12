@@ -1,10 +1,7 @@
 package com.ia.recog_track;
 
-import static androidx.camera.core.ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST;
-import static androidx.camera.core.ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY;
 import static androidx.camera.core.impl.utils.TransformUtils.getRectToRect;
 import static androidx.camera.core.impl.utils.TransformUtils.rotateRect;
-import static androidx.camera.view.CameraController.COORDINATE_SYSTEM_VIEW_REFERENCED;
 
 import static com.google.android.gms.common.util.CollectionUtils.listOf;
 
@@ -16,14 +13,9 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.camera2.interop.Camera2Interop;
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
 import androidx.camera.core.ExperimentalGetImage;
-import androidx.camera.core.ExposureState;
 import androidx.camera.core.ImageAnalysis;
-import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageProxy;
-import androidx.camera.core.impl.CaptureConfig;
 import androidx.camera.lifecycle.ProcessCameraProvider;
-import androidx.camera.mlkit.vision.MlKitAnalyzer;
-import androidx.camera.video.MediaStoreOutputOptions;
 import androidx.camera.view.LifecycleCameraController;
 import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
@@ -52,7 +44,6 @@ import android.provider.MediaStore;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
 import android.util.Log;
-import android.util.Range;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
@@ -69,7 +60,6 @@ import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.mlkit.common.model.LocalModel;
 import com.google.mlkit.vision.common.InputImage;
-import com.google.mlkit.vision.interfaces.Detector;
 import com.google.mlkit.vision.label.ImageLabel;
 import com.google.mlkit.vision.label.ImageLabeler;
 import com.google.mlkit.vision.label.ImageLabeling;
@@ -89,8 +79,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.text.Normalizer;
-import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -99,7 +87,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 
 import jp.co.cyberagent.android.gpuimage.GPUImage;
-import jp.co.cyberagent.android.gpuimage.filter.GPUImage3x3ConvolutionFilter;
 import jp.co.cyberagent.android.gpuimage.filter.GPUImageFilter;
 import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
 
@@ -527,7 +514,7 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
                            Text text = (Text) task.getResult();
                            Log.i("textRecognizerByImage", "textRecognizerByImage " + text.getText());
                            if (!text.getText().isEmpty()) {
-                               String linha = getLinha(text.getText());
+                               String linha = getLine(text.getText());
                                if (!linha.isEmpty()) {
                                    //saveText(linha);
                                    showLinhaTemporarily(linha);
@@ -654,7 +641,7 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         }
     }
 
-    public String getLinha(String linha){
+    public String getLine(String linha){
         Linhas linhas = new Linhas();
         String[] map = linhas.getMap();
         int count = 0;
