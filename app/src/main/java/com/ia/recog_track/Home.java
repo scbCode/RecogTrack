@@ -82,6 +82,7 @@ import java.text.Normalizer;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
@@ -98,7 +99,9 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
 @ExperimentalGetImage public class Home extends AppCompatActivity {
     private static final String TAG = "Home";
     private static final float OVERLAY_STROKE_WIDTH = 5f;
-    private static final int LINE_TEXT_VISIBLE_MILLIS = 3000;
+    private static final int LINE_TEXT_VISIBLE_MILLIS = 5000;
+    private static final long OCR_COOLDOWN_MILLIS = 800;
+    private static final long OCR_TEXT_DEDUP_WINDOW_MILLIS = 1000;
     /**
      * Whether or not the system UI should be auto-hidden after
      * {@link #AUTO_HIDE_DELAY_MILLIS} milliseconds.
@@ -195,6 +198,11 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
     ObjectDetector objectDetector;
     private ImageLabeler imageLabeler;
     TextRecognizer recognizer;
+    private boolean isOcrInFlight = false;
+    private long lastOcrStartAt = 0L;
+    private long lastProcessedOcrTextAt = 0L;
+    private String lastProcessedOcrText = "";
+    private String lastShownLine = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -387,7 +395,7 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
     void bindPreview(@NonNull ProcessCameraProvider cameraProvider) {
 
         ImageAnalysis.Builder imageAnalysisBuilder = new ImageAnalysis.Builder();
-        buildImageAnalysis(imageAnalysisBuilder);
+//        buildImageAnalysis(imageAnalysisBuilder);
         imageAnalysis = imageAnalysisBuilder.build();
 
         LifecycleCameraController lifecycleCameraController = new LifecycleCameraController(getApplicationContext());
@@ -445,7 +453,6 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         Canvas tempCanvas = new Canvas(tempBitmap);
         Paint paint = createStrokePaint(Color.CYAN);
         Bitmap enhancedFrame = changeBitmapContrastBrightness(imageProxy.toBitmap(), 2, 4);
-
         for (DetectedObject detectedObject : detections) {
             drawBoundingBox(tempCanvas, detectedObject.getBoundingBox(), paint);
             InputImage inputImageClassification = InputImage.fromBitmap(enhancedFrame, rotationDegrees);
@@ -505,28 +512,39 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
    public void textRecognizerByImage(Bitmap inputImage, int rd){
        try {
 
+       if (!tryAcquireOcrSlot()) {
+           return;
+       }
+
        taskTextRec = recognizer.process(InputImage.fromBitmap(inputImage,rd));
 
        taskTextRec.addOnCompleteListener(
                executor, task -> {
-                   if (task.isSuccessful()){
-                       if (task.getResult() != null) {
-                           Text text = (Text) task.getResult();
-                           Log.i("textRecognizerByImage", "textRecognizerByImage " + text.getText());
-                           if (!text.getText().isEmpty()) {
-                               String linha = getLine(text.getText());
-                               if (!linha.isEmpty()) {
-                                   //saveText(linha);
-                                   showLinhaTemporarily(linha);
+                   try {
+                       if (task.isSuccessful()){
+                           if (task.getResult() != null) {
+                               Text text = (Text) task.getResult();
+                               String rawText = text.getText();
+                               Log.i("textRecognizerByImage", "textRecognizerByImage " + rawText);
+                               if (!rawText.isEmpty() && !shouldSkipOcrText(rawText)) {
+                                   String linha = getLine(rawText);
+                                   if (!linha.isEmpty() && !linha.equals(lastShownLine)) {
+                                       //saveText(linha);
+                                       lastShownLine = linha;
+                                       showLinhaTemporarily(linha);
                                      saveImageNoClassification(processImg(inputImage));
+                                   }
                                }
                            }
                        }
+                   } finally {
+                       releaseOcrSlot();
                    }
                });
 
        }catch (Exception e){
            Log.i("textRecognizerByImage", "textRecognizerByImage catch" + e.getMessage());
+           releaseOcrSlot();
 
        }
 
@@ -535,6 +553,7 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
     private void showLinhaTemporarily(String linha) {
         runOnUiThread(() -> {
             linhaTextView.setText(linha);
+            Log.i("linhaTextView", "linhaTextView " + linha);
             new Handler(Looper.getMainLooper()).postDelayed(
                     () -> linhaTextView.setText(""),
                     LINE_TEXT_VISIBLE_MILLIS
@@ -587,7 +606,9 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
                                 if (isTransitLabel(label)) {
                                     drawBoundingBox(tempCanvas, rect, createStrokePaint(Color.BLUE));
                                     showOverlay(labelOverlayView, tempBitmap);
-                                    textRecognizerByImage(inputImage.getBitmapInternal(),rotationDegrees);
+                                    if (shouldRunOcrNow()) {
+                                        textRecognizerByImage(inputImage.getBitmapInternal(), rotationDegrees);
+                                    }
                                 }
                                 Log.i("getlabel", "getlabel " + label);
                             }
@@ -602,6 +623,44 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
             Log.i("Exception", "Exception e "+e.getMessage());
 
         }
+    }
+
+    private synchronized boolean shouldRunOcrNow() {
+        long now = System.currentTimeMillis();
+        if (isOcrInFlight) {
+            return false;
+        }
+        return (now - lastOcrStartAt) >= OCR_COOLDOWN_MILLIS;
+    }
+
+    private synchronized boolean tryAcquireOcrSlot() {
+        if (!shouldRunOcrNow()) {
+            return false;
+        }
+        isOcrInFlight = true;
+        lastOcrStartAt = System.currentTimeMillis();
+        return true;
+    }
+
+    private synchronized void releaseOcrSlot() {
+        isOcrInFlight = false;
+    }
+
+    private synchronized boolean shouldSkipOcrText(String rawText) {
+        String normalized = stripAccents(rawText)
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ")
+                .trim();
+
+        long now = System.currentTimeMillis();
+        boolean isDuplicate = normalized.equals(lastProcessedOcrText)
+                && (now - lastProcessedOcrTextAt) < OCR_TEXT_DEDUP_WINDOW_MILLIS;
+
+        if (!normalized.isEmpty()) {
+            lastProcessedOcrText = normalized;
+            lastProcessedOcrTextAt = now;
+        }
+        return isDuplicate;
     }
 
     private boolean isTransitLabel(String label) {
@@ -647,11 +706,27 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
         int count = 0;
         for (int i = 0; i <  map.length; i++) {
             String numLinha = map[i].split(" : ")[0];
-            String nomeLinha = map[i].split(" : ")[1];
-            String number = linha.replaceAll("[^0-9]","").replaceAll("-","");
-            String onlyletter = linha.replaceAll(("[a-zA-Z]+"),"");
-            Log.i("getLinha","getLinha onlyletter "+ onlyletter);
-            Log.i("getLinha","getLinha ##############################################");
+            String nomeLinha = map[i].split(" : ")[1].toLowerCase();
+            String number  = linha.replaceAll("[^0-9]","");
+            String  onlyletter = linha.replaceAll(("[a-zA-Z]+"),"").toLowerCase();
+            linha = linha.toLowerCase();
+            Log.i("number", "number " + number);
+            Log.i("nomeLinha", "onlyletter " + onlyletter);
+
+            if(number.equals(numLinha)){
+                return map[i];
+            }else
+            if(number.length()>3){
+                String n = number.substring(0,3);
+                if (numLinha.contains(n))
+                    return map[i];
+            }else
+            if(linha.length()<=3)
+                if(number.equals(numLinha)){
+                    count=1;
+                    return map[i];
+                }else
+
             if (onlyletter.length()>3) {
                 if (onlyletter.contains(nomeLinha)) {
                     if (stripAccents(linha).toLowerCase().equals(stripAccents(nomeLinha).toLowerCase())) {
@@ -659,26 +734,13 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLightenBlendFilter;
                         return map[i];
                     }
                 }
-            }
+            }else
             if (onlyletter.length()==3) {
                 if (number.contains(numLinha)) {
-                        count = 3;
-                        return map[i];
-                }
-            }
-            if(number.equals(numLinha)){
-                return map[i];
-            }
-            if(number.length()>3){
-                String n = number.substring(0,3);
-                if (numLinha.contains(n))
-                    return map[i];
-            }
-            if(linha.length()<=3)
-                if(number.equals(numLinha)){
-                    count=1;
+                    count = 3;
                     return map[i];
                 }
+            }
         }
         return "";
     }
@@ -757,4 +819,3 @@ abstract class ImgCallBack {
      public void onSuccess(){}
     public void onError(){}
 }
-

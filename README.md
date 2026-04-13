@@ -12,6 +12,11 @@ Sistemas tradicionais de rastreio de frotas exigem instalação de hardware GPS 
 
 **A hipótese:** uma câmera, um modelo de detecção e OCR são suficientes para identificar e registrar ônibus em tempo real, a partir de um ponto fixo ou móvel, sem tocar no veículo.
 
+<div align="center">
+  <img src="assets/urban_recogtrack_bel_pa.gif" alt="RecogTrack Demo" width="320" />
+  <p><em>Pipeline em ação: detecção → OCR → registro</em></p>
+</div>
+
 ---
 
 ## 💡 A Solução
