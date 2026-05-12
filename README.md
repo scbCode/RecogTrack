@@ -39,7 +39,7 @@ O pipeline roda **inteiramente on-device**, sem depender de servidor para infer�
 
 | Camada | Tecnologia | Decisão |
 |---|---|---|
-| Câmera | **CameraX + Camera2 Interop** | Controle manual de AE/AWB para estabilizar frames em movimento |
+| Câmera | **CameraX Interop** | Controle manual de AE/AWB para estabilizar frames em movimento |
 | Detecção | **ML Kit Object Detection** + modelo `.tflite` customizado | Modelo treinado para veículos urbanos |
 | Classificação | **ML Kit Custom Image Labeler** | Filtra falsos positivos antes do OCR (reduz custo de processamento) |
 | OCR | **ML Kit Text Recognition** | Extrai número e nome da linha diretamente do painel do veículo |
